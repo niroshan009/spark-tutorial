@@ -12,6 +12,7 @@ import org.example.util.DateConversionUtil;
 
 import java.sql.Timestamp;
 import java.util.Properties;
+import java.util.Scanner;
 
 import static org.apache.spark.sql.functions.row_number;
 
@@ -24,10 +25,14 @@ public class DataSetMainTutorial {
         SparkConf conf = new SparkConf().setAppName("startingSpark").setMaster("local[*]");
         JavaSparkContext sc = new JavaSparkContext(conf);
         SQLContext sqlContext = new SQLContext(sc);
-
         SparkSession sparkSession = SparkSession.builder().appName("testsql").master("local[*]").config("spark.sql.warehouse.dir", "file:///~/tmp").getOrCreate();
 
-        Dataset<Row> inputData = sparkSession.read().option("header", false).text("src/main/resources/inputfile.txt");
+        Encoder<ProductSale> productSaleEncoder = Encoders.bean(ProductSale.class);
+
+        Dataset<Row> inputData = sparkSession.read().option("header", false).text("src/main/resources/inputfile_2.txt");
+//        inputData.show();
+
+
 
         // generate input data with mapping
         Dataset<ProductSale> salesDataset = inputData.map(row -> {
@@ -39,25 +44,49 @@ public class DataSetMainTutorial {
             String timeSt = s.substring(9, 32);
             Timestamp saleTimeStamp = DateConversionUtil.convertTimestamp(timeSt, Constants.TIMESTAMP_YYYY_MM_DD_HH_MM_SS_SSS);
             return new ProductSale(product, code, count, unitPrice, unitPrice * count, saleTimeStamp);
-        }, Encoders.bean(ProductSale.class));
+        }, Encoders.bean(ProductSale.class)).as("sales");
 
-        // filter sale count greater than 4000
-        Dataset<ProductSale> higher_sales = salesDataset.filter("count>4000");
 
         // window function to see the row number
         WindowSpec w = org.apache.spark.sql.expressions.Window
                 .partitionBy("productId")
-                .orderBy("unitPrice", "total");
-        higher_sales.repartition(new Column("productId"));
-        Dataset<Row> partitionByProduct = higher_sales.withColumn("row_num", row_number().over(w));
-        partitionByProduct.show(true);
+                .orderBy("productId");
+        Dataset<ProductSale> formattedData = salesDataset
+                .repartition(new Column("productId"), new Column("productCode"))
+                .withColumn("row_num", row_number().over(w)).as(productSaleEncoder);
+
+        // read product for joining
+        Dataset<Row> productDataset = readDataFromDbTable(sqlContext, "(select productId, productCode from product)").repartition(new Column("productId"));
+
+        //filter data only in product table
+        Dataset<ProductSale> filterDataWhichInProduct = formattedData
+                .join(productDataset,
+                        formattedData.col("productId").equalTo(productDataset.as("product").col("productId"))
+                                .and( formattedData.col("productCode").equalTo(productDataset.as("product").col("productCode"))), "inner")
+                .select(formattedData.col("count"),
+                        formattedData.col("productCode"),
+                        formattedData.col("productId"),
+                        formattedData.col("saleTimeStamp"),
+                        formattedData.col("total"),
+                        formattedData.col("unitPrice"))
+                .as(productSaleEncoder);
+
+
+        System.out.println("Number of partitions: "+ filterDataWhichInProduct.rdd().getNumPartitions());
+
+        // filter sale count greater than 4000
+        Dataset<ProductSale> higher_sales = filterDataWhichInProduct.filter("count>4000").as(productSaleEncoder);
 
         // filter data
-        Dataset<ProductSale> lowerSalesCount = salesDataset.filter("count<=4000");
+        Dataset<ProductSale> lowerSalesCount = filterDataWhichInProduct.filter("count<=4000");
+
+
 
         // save data to the database
         saveDataToDB(higher_sales, SaveMode.Overwrite, "product_sale_higher");
         saveDataToDB(lowerSalesCount, SaveMode.Overwrite, "product_sale_lower");
+        Scanner scanner = new Scanner(System.in);
+        scanner.nextLine();
     }
 
 
@@ -77,7 +106,7 @@ public class DataSetMainTutorial {
     }
 
 
-    private static Dataset<Row> readDataFromDbTable(SQLContext sqlContext, String table) {
+    private static Dataset readDataFromDbTable(SQLContext sqlContext, String table) {
         Dataset<Row> dataset = sqlContext
                 .read()
                 .format("jdbc")

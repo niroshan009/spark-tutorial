@@ -17,6 +17,9 @@ public class ProductSale implements Serializable {
 
     private Timestamp saleTimeStamp;
 
+    public ProductSale() {
+    }
+
     public ProductSale(String productId, String productCode, Integer count, Integer unitPrice, Integer total) {
         this.productId = productId;
         this.productCode = productCode;
