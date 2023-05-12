@@ -22,14 +22,14 @@ public class DataSetMainTutorial {
 
         Logger.getLogger("org.apache").setLevel(Level.WARN);
 
-        SparkConf conf = new SparkConf().setAppName("startingSpark").setMaster("local[*]");
+        SparkConf conf = new SparkConf().setAppName("startingSpark");//.setMaster("local[*]");
         JavaSparkContext sc = new JavaSparkContext(conf);
         SQLContext sqlContext = new SQLContext(sc);
         SparkSession sparkSession = SparkSession.builder().appName("testsql").master("local[*]").config("spark.sql.warehouse.dir", "file:///~/tmp").getOrCreate();
 
         Encoder<ProductSale> productSaleEncoder = Encoders.bean(ProductSale.class);
 
-        Dataset<Row> inputData = sparkSession.read().option("header", false).text("src/main/resources/inputfile_2.txt");
+        Dataset<Row> inputData = sparkSession.read().option("header", false).text("./inputfile_2.txt");
 //        inputData.show();
 
 
@@ -72,7 +72,7 @@ public class DataSetMainTutorial {
                 .as(productSaleEncoder);
 
 
-        System.out.println("Number of partitions: "+ filterDataWhichInProduct.rdd().getNumPartitions());
+        System.out.println("Number of partitions: "+ formattedData.rdd().getNumPartitions());
 
         // filter sale count greater than 4000
         Dataset<ProductSale> higher_sales = filterDataWhichInProduct.filter("count>4000").as(productSaleEncoder);
@@ -83,10 +83,12 @@ public class DataSetMainTutorial {
 
 
         // save data to the database
-        saveDataToDB(higher_sales, SaveMode.Overwrite, "product_sale_higher");
-        saveDataToDB(lowerSalesCount, SaveMode.Overwrite, "product_sale_lower");
-        Scanner scanner = new Scanner(System.in);
-        scanner.nextLine();
+        higher_sales.explain();
+        lowerSalesCount.explain();
+//        saveDataToDB(higher_sales, SaveMode.Overwrite, "product_sale_higher");
+//        saveDataToDB(lowerSalesCount, SaveMode.Overwrite, "product_sale_lower");
+//        Scanner scanner = new Scanner(System.in);
+//        scanner.nextLine();
     }
 
 
